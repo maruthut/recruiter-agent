@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "default-server": {
+            "command": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+            "args": ["exec", "-i", "resume-tailor-mcp", "sh", "-c", "python main.py 2>/dev/null"],
+            "env": {
+                "LOG_LEVEL": "ERROR"
+            }
+        }
+    }
+}

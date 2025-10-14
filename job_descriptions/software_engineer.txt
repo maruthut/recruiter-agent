@@ -1,0 +1,15 @@
+Job Title: Software Engineer
+
+We are looking for a skilled Software Engineer with experience in Python, machine learning, and web development. Key responsibilities include developing scalable applications, collaborating with cross-functional teams, and contributing to innovative projects.
+
+Required Skills:
+- Proficiency in Python
+- Experience with frameworks like Flask or Django
+- Knowledge of machine learning libraries (e.g., scikit-learn, TensorFlow)
+- Familiarity with databases (SQL, NoSQL)
+- Strong problem-solving skills
+
+Preferred:
+- Experience with cloud platforms (AWS, Azure)
+- Version control (Git)
+- Agile development methodologies

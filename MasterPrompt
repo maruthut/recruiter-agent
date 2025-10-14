@@ -1,0 +1,261 @@
+MASTER PROMPT for HR Recruiter Agent 🤖
+You are an expert Python developer and AI architect. Your task is to write a single, complete Python script that creates and runs an HR recruitment agent using LangChain. The code should be fully functional, well-commented, production-ready, and secure.
+
+Project Overview
+The agent's main purpose is to act as an automated HR recruiter. It will take a job description (from a file or URL) and a folder of resumes, then use an external MCP (Model Context Protocol) server to match and rank the resumes. Finally, it will generate a detailed, human-readable report in a specified output folder.
+
+Current Implementation Status (October 2025)
+✅ Production-Ready: Fully implemented with comprehensive error handling, security features, and logging
+✅ MCP Integration: Uses stdio-based MCP protocol (not REST API) with Docker container
+✅ Dynamic Features: Job title extraction, intelligent report generation
+✅ Security Hardened: Input sanitization, path traversal protection, file validation
+✅ Documentation: Complete README.md, CODE_REVIEW.md, IMPROVEMENTS.md
+
+Key Requirements
+Libraries: The script imports all necessary libraries including:
+- Core: os, json, asyncio, logging, re, pathlib
+- Type hints: typing (Dict, List, Optional, Any)
+- Environment: dotenv for configuration management
+- MCP Protocol: mcp (ClientSession, StdioServerParameters), mcp.client.stdio
+- LangChain: langchain_core.tools.tool, langchain.agents (AgentExecutor, create_react_agent)
+- LLM: langchain_google_genai (ChatGoogleGenerativeAI) - Using Gemini 2.0 Flash
+- File Handling: PyPDF2 for PDF, python-docx for DOCX, standard file I/O for text
+
+File Handling: 
+- PyPDF2 for PDF parsing
+- python-docx for DOCX parsing
+- Standard os and file I/O for text files
+- Security: File validation (extension whitelist, size limits, path sanitization)
+
+LLM & Agent: 
+- Google Gemini API (gemini-2.0-flash model)
+- LangChain ReAct agent pattern
+- Temperature: 0.1 for consistent results
+
+Configuration: Define global variables and constants:
+- GOOGLE_API_KEY: From .env file for Gemini API
+- MCP_CONFIG_FILE: Path to mcp.json configuration
+- RESUMES_FOLDER: Folder containing all resume files
+- JOB_DESCRIPTIONS_FOLDER: Folder containing job description files
+- RESULTS_FOLDER: Folder where final analysis reports are saved
+- Constants: MCP_TOOL_RANK_RESUMES, SUPPORTED_FILE_EXTENSIONS, MAX_FILE_SIZE_MB
+Note: Script creates folders if they don't exist
+
+The MCP Server Integration:
+
+The agent interacts with an MCP server via stdio protocol (NOT REST API).
+
+Connection: Uses Docker container "resume-tailor-mcp" via stdio communication
+
+MCP Configuration (mcp.json):
+{
+  "mcpServers": {
+    "default-server": {
+      "command": "docker.exe path",
+      "args": ["exec", "-i", "resume-tailor-mcp", "sh", "-c", "python main.py 2>/dev/null"],
+      "env": {"LOG_LEVEL": "ERROR"}
+    }
+  }
+}
+
+Available MCP Tools:
+- rank_resumes_mcp: Ranks multiple resumes against job description
+- fetch_job_description_mcp: Fetches job description from URLs
+- analyze_resume_mcp: Detailed analysis of individual resumes
+
+Dynamic Tool Discovery: Agent discovers available tools at runtime using session.list_tools()
+
+Tool Caching: Discovered tools are cached globally (_mcp_tools_cache) for performance
+
+Custom Tools: Implemented using the @tool decorator with comprehensive docstrings, type hints, and error handling.
+
+1. get_job_description_content(job_description_file: str) -> str:
+   - Takes job description filename as input
+   - Security: Sanitizes filename using sanitize_filename() to prevent path traversal
+   - Checks if input is a URL (starts with "http" or "https")
+   - If URL: Uses MCP server's fetch_job_description_mcp tool
+   - If file: Reads from JOB_DESCRIPTIONS_FOLDER
+   - Supports: .txt, .docx, and .pdf formats with validate_file_path()
+   - Error Handling: Comprehensive try-catch with logging
+   - Returns: Job description content as string
+
+2. match_resumes(job_description: str) -> str:
+   - Main orchestration tool for resume analysis
+   - Discovers resume files in RESUMES_FOLDER (.pdf, .docx, .txt)
+   - Validates each resume file (extension, size, readability)
+   - Reads resume content using read_file_content() helper
+   - Calls MCP server's rank_resumes_mcp tool via discover_and_invoke_tool()
+   - MCP server handles batching internally (no manual batch management needed)
+   - Transforms MCP response format:
+     * score → percentage
+     * strengths → skills_available
+     * improvements → skills_missing
+   - Error Handling: Resume-level validation, detailed logging
+   - Returns: JSON string with analysis results
+
+3. generate_report(analysis_data: str) -> str:
+   - Creates human-readable Markdown report from analysis data
+   - Dynamic Job Title: Extracts title using extract_job_title_from_content()
+   - Sorts candidates by match percentage (descending)
+   - Safe Filename: Sanitizes job title for filesystem
+   - Report Structure:
+     * Header with position and date
+     * Ranked candidates with scores
+     * Strengths (skills_available)
+     * Areas for improvement (skills_missing)
+     * Summary statistics (average score, top candidate)
+   - Error Handling: JSON parsing, file writing errors
+   - Returns: Path to generated report file
+
+Helper Functions:
+4. discover_and_invoke_tool(tool_name: str, arguments: dict) -> Optional[Any]:
+   - Async function for MCP server communication
+   - Establishes stdio connection to MCP server
+   - Discovers available tools (cached globally)
+   - Invokes specified tool with arguments
+   - Parses JSON response from result.content[0].text
+   - Error Handling: Connection failures, tool not found, invocation errors
+
+5. read_file_content(file_path: str) -> str:
+   - Multi-format file parser
+   - Validates file before reading
+   - Handles: TXT (UTF-8), PDF (PyPDF2), DOCX (python-docx)
+   - Error Handling: File access, parsing errors
+
+6. sanitize_filename(filename: str) -> str:
+   - Security function to prevent path traversal
+   - Removes directory components (os.path.basename)
+   - Validates against safe character pattern [a-zA-Z0-9_.-]
+   - Returns "safe_filename" as fallback
+
+7. validate_file_path(file_path: str) -> bool:
+   - Validates file existence and readability
+   - Checks extension against SUPPORTED_FILE_EXTENSIONS whitelist
+   - Enforces MAX_FILE_SIZE_MB limit (10MB)
+   - Raises ValueError with descriptive messages
+
+8. extract_job_title_from_content(content: str) -> str:
+   - Extracts job title from description content
+   - Regex patterns: "Job Title:", "Position:", "Role:"
+   - Cleans extracted title (removes extra whitespace)
+   - Returns "Position" as fallback if extraction fails
+
+Agent Logic:
+
+LLM Model: ChatGoogleGenerativeAI
+- Model: gemini-2.0-flash
+- Temperature: 0.1 (for consistent, deterministic results)
+- API Key: Loaded from environment (GOOGLE_API_KEY)
+- Configuration: convert_system_message_to_human=True for Gemini compatibility
+
+Tools List: [get_job_description_content, match_resumes, generate_report]
+
+Agent Type: ReAct (Reasoning + Acting)
+- Created with: create_react_agent(llm, tools, prompt)
+- Executor: AgentExecutor with verbose=True for transparency
+
+System Prompt:
+- Persona: Expert HR recruiter
+- Instructions: Step-by-step task breakdown
+  1. Read job description file using get_job_description_content
+  2. Process all resumes in RESUMES_FOLDER using match_resumes
+  3. Generate report using generate_report
+- Format: ReAct pattern (Thought/Action/Action Input/Observation cycle)
+
+User Input: Simple filename (e.g., "software_engineer.txt")
+
+Script Structure:
+
+1. Module Docstring
+   - Purpose, features, author, date
+
+2. Imports
+   - Standard library: os, json, asyncio, logging, re
+   - Type hints: typing.Dict, List, Optional, Any
+   - Third-party: dotenv, mcp, langchain, langchain_google_genai
+   - File handlers: PyPDF2, python-docx
+
+3. Logging Configuration
+   - Level: INFO
+   - Format: timestamp, logger name, level, message
+
+4. Environment & Constants
+   - load_dotenv()
+   - GOOGLE_API_KEY, MCP_CONFIG_FILE
+   - MCP_TOOL_* constants
+   - File limits and extensions
+
+5. Folder Configuration
+   - RESUMES_FOLDER, JOB_DESCRIPTIONS_FOLDER, RESULTS_FOLDER
+   - os.makedirs() with exist_ok=True
+
+6. MCP Configuration Loading
+   - Read mcp.json
+   - Extract command, args, env
+   - Error handling for missing config
+
+7. Global Cache
+   - _mcp_tools_cache: Optional[List[Any]] = None
+
+8. Helper Functions
+   - sanitize_filename()
+   - validate_file_path()
+   - extract_job_title_from_content()
+   - discover_and_invoke_tool() [async]
+   - read_file_content()
+
+9. Tool Definitions (@tool)
+   - get_job_description_content
+   - match_resumes
+   - generate_report
+
+10. Main Execution Block (if __name__ == "__main__":)
+    - Environment validation (GOOGLE_API_KEY, MCP_CONFIG_FILE)
+    - LLM instantiation
+    - Tools list creation
+    - System prompt definition
+    - Agent creation (create_react_agent)
+    - AgentExecutor setup
+    - Sample input processing
+    - User-friendly output with banners
+    - Comprehensive error handling:
+      * KeyboardInterrupt (exit code 130)
+      * General exceptions with logging
+      * Proper exit codes (0=success, 1=error)
+
+Progress Indicators:
+- Logging: All operations logged at INFO level
+- Console output: Banners for start/completion
+- Agent verbose mode: Shows reasoning steps
+
+Security Features:
+- Input sanitization for all file operations
+- Path traversal protection
+- File size and extension validation
+- Environment variable validation
+
+Production Readiness:
+- Comprehensive error handling
+- Structured logging for monitoring
+- Type hints for maintainability
+- Security hardening
+- Performance optimization (caching)
+- Professional documentation
+
+Final Deliverable Status
+✅ Complete: hr_agent.py (503 lines, fully functional)
+✅ Documented: README.md with setup, usage, troubleshooting
+✅ Quality Assured: CODE_REVIEW.md, IMPROVEMENTS.md
+✅ Version Control Ready: .gitignore, .gitkeep for folder structure
+✅ Tested: Successful execution with accurate results
+✅ Production Ready: All critical/major/minor issues resolved
+
+Current Features:
+- Dynamic job title extraction (no hardcoding)
+- MCP server integration via stdio protocol
+- Accurate resume ranking (Alice: 95%, Bob: 50%)
+- Professional Markdown reports with summary statistics
+- Security protections (sanitization, validation)
+- Performance optimizations (tool caching)
+- Comprehensive logging and error handling
+- Multi-format file support (TXT, PDF, DOCX)
