@@ -1,3 +1,9 @@
+"""
+DEPRECATED: This test file is for stdio mode MCP connection which has been removed.
+Please use test_mcp_http.py for testing Streamable HTTP MCP connections.
+
+This file is kept for reference only.
+"""
 import asyncio
 import json
 from mcp import ClientSession, StdioServerParameters

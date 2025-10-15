@@ -1,3 +1,9 @@
+"""
+DEPRECATED: This test file is for stdio mode MCP connection which has been removed.
+Please use the main hr_agent.py with Streamable HTTP MCP for resume ranking.
+
+This file is kept for reference only.
+"""
 import asyncio
 import json
 import os

@@ -1,0 +1,52 @@
+
+Saravanan Prasannam
+Sep 18, 2025, 10:38 PM
+to me
+
+Title: ML Ops Engineer
+
+Client: PNC Bank
+
+Work mode: Hybrid, 3 days in office
+
+Locations:  Pittsburgh, PA, Cleveland, OH, Dallas, TX, Birmingham, AL or Phoenix, AZ
+
+ Job Description:
+
+As MLOps Engineer, you will work collaboratively with Data Scientists and Data engineers to deploy and operate advanced analytics machine learning models.
+
+You will help automate and streamline Model development and Model operations.
+
+You will build and maintain tools for deployment, monitoring, and operations.
+
+You will also troubleshoot and resolve issues in development, testing, and production environments.
+
+Enable Model tracking, model experimentation, Model automation.
+
+Develop scalable ML pipelines.
+
+Develop MLOps components in Machine learning development life cycle using Model Repository.
+
+Technical Skills:
+
+In-depth knowledge of SageMaker, including domain setup, configuration, and infrastructure management.
+
+A deep understanding of cloud computing concepts, especially related to Amazon Web Services (AWS).
+
+Ability to design and implement MLOPs cloud solutions, considering scalability, security, and performance.
+
+Practical firsthand experience with cloud MLOps and Data Analytics platforms, preferably AWS SageMaker, Glue, EMR, Athena.
+
+Understanding of EC2 instance types and their suitability for AWS SageMaker.
+
+Proficiency in using Amazon S3 for data storage and SageMaker input/output.
+
+Ability to manage permissions and access control using Identity and Access Management.
+
+Knowledge of serverless computing for automating tasks.
+
+Experience with creating data pipelines using AWS SageMaker services integrated with Glue and EMR.
+
+Proficiency in monitoring SageMaker cluster health, identifying bottlenecks, and resolving issues.
+
+Proficient in Python, R, Spark, SQL in scripting languages for automating tasks.

@@ -3,11 +3,11 @@ HR Recruiter AI Agent - Automated Resume Screening and Ranking System
 
 This module provides an AI-powered agent that:
 - Reads job descriptions from files or URLs
-- Matches resumes against job requirements using an MCP server
+- Matches resumes against job requirements using an MCP server via Streamable HTTP
 - Generates comprehensive ranking reports
 
 Author: AI Assistant
-Date: October 13, 2025
+Date: October 14, 2025
 """
 
 import os
@@ -15,11 +15,10 @@ import json
 import asyncio
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 from langchain_core.tools import tool
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -37,7 +36,7 @@ load_dotenv()
 
 # Environment Variables
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-MCP_CONFIG_FILE = "mcp.json"
+MCP_HTTP_URL = os.getenv("MCP_HTTP_URL", "http://localhost:5002/mcp")
 
 # Constants
 MCP_TOOL_RANK_RESUMES = "rank_resumes_mcp"
@@ -55,18 +54,8 @@ os.makedirs(RESUMES_FOLDER, exist_ok=True)
 os.makedirs(JOB_DESCRIPTIONS_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
-# Load MCP configuration
-try:
-    with open('mcp.json', 'r') as f:
-        mcp_config = json.load(f)
-    server_config = mcp_config['mcpServers']['default-server']
-    command = server_config['command']
-    args = server_config['args']
-    env = server_config.get('env', {})
-    logger.info("MCP configuration loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load MCP configuration: {e}")
-    raise
+# MCP Configuration
+logger.info(f"MCP Streamable HTTP mode enabled. URL: {MCP_HTTP_URL}")
 
 # Cache for MCP tools
 _mcp_tools_cache: Optional[List[Any]] = None
@@ -113,56 +102,156 @@ def validate_file_path(file_path: str, max_size_mb: int = MAX_FILE_SIZE_MB) -> N
 
 async def discover_and_invoke_tool(tool_name: str, **kwargs) -> Dict[str, Any]:
     """
-    Discover and invoke an MCP tool.
-    
+    Discover and invoke an MCP tool using Streamable HTTP transport.
+    Uses JSON-RPC 2.0 over HTTP POST with session management.
+
     Args:
         tool_name: Name of the MCP tool to invoke
         **kwargs: Arguments to pass to the tool
-        
+
     Returns:
         Dict containing the tool result
-        
+
     Raises:
         ValueError: If tool not found
+        ImportError: If httpx is not installed
         Exception: For connection or execution errors
     """
     global _mcp_tools_cache
-    
+
     try:
-        server_params = StdioServerParameters(
-            command=command,
-            args=args,
-            env=env
-        )
-        
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        import httpx
+        import json
+
+        logger.info(f"Connecting to MCP server via Streamable HTTP: {MCP_HTTP_URL}")
+
+        # Message ID counter and session ID storage
+        message_id = [1]
+        session_id = [None]
+
+        async def send_jsonrpc(method: str, params=None, is_notification=False):
+            """Send a JSON-RPC 2.0 message via HTTP POST."""
+            msg = {
+                "jsonrpc": "2.0",
+                "method": method
+            }
+            
+            # Notifications don't have an id field
+            if not is_notification:
+                msg["id"] = message_id[0]
+                message_id[0] += 1
+            
+            # Only include params if explicitly provided and not None
+            if params is not None:
+                msg["params"] = params
+
+            logger.debug(f"Sending MCP {'notification' if is_notification else 'request'}: {method}")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"
+            }
+            
+            # Add session ID to subsequent requests
+            if session_id[0]:
+                headers["mcp-session-id"] = session_id[0]
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    MCP_HTTP_URL,
+                    json=msg,
+                    headers=headers,
+                    timeout=30.0
+                )
                 
-                # Use cached tools if available
-                if _mcp_tools_cache is None:
-                    tools_list = await session.list_tools()
-                    _mcp_tools_cache = tools_list.tools
-                    logger.info(f"✅ Discovered MCP tools: {[t.name for t in _mcp_tools_cache]}")
+                # Capture session ID from first response
+                if not session_id[0] and 'mcp-session-id' in response.headers:
+                    session_id[0] = response.headers['mcp-session-id']
+                    logger.debug(f"Captured session ID: {session_id[0]}")
                 
-                # Find the tool
-                tool_info = next((t for t in _mcp_tools_cache if t.name == tool_name), None)
-                if not tool_info:
-                    raise ValueError(f"Tool '{tool_name}' not found on MCP server. Available: {[t.name for t in _mcp_tools_cache]}")
+                response.raise_for_status()
                 
-                # Invoke the tool
-                logger.info(f"Invoking MCP tool: {tool_name}")
-                result = await session.call_tool(tool_name, kwargs)
-                
-                # Parse the result content
-                if result.content:
-                    for content_item in result.content:
-                        if hasattr(content_item, 'text'):
-                            return json.loads(content_item.text)
-                
-                logger.warning(f"No text content in result from {tool_name}")
-                return {}
-                
+                # Handle SSE stream response
+                content_type = response.headers.get('content-type', '')
+                if 'text/event-stream' in content_type:
+                    # Parse SSE events
+                    for line in response.text.split('\n'):
+                        if line.startswith('data: '):
+                            data = line[6:]  # Remove 'data: ' prefix
+                            result = json.loads(data)
+                            if 'error' in result:
+                                raise Exception(f"MCP error: {result['error']}")
+                            return result
+                    raise Exception("No valid data in SSE stream")
+                else:
+                    result = response.json()
+                    if 'error' in result:
+                        raise Exception(f"MCP error: {result['error']}")
+                    return result
+
+        # Initialize session
+        init_result = await send_jsonrpc("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "hr-agent",
+                "version": "1.0.0"
+            }
+        })
+        logger.info(f"✅ MCP session initialized (Streamable HTTP) - Session ID: {session_id[0]}")
+
+        # Send initialized notification to complete the handshake
+        try:
+            await send_jsonrpc("notifications/initialized", {}, is_notification=True)
+            logger.debug("Sent initialized notification")
+        except Exception as e:
+            # Some servers may not require this or handle it differently
+            logger.debug(f"Initialized notification handling: {e}")
+
+        # Discover tools if not cached
+        if _mcp_tools_cache is None:
+            try:
+                tools_result = await send_jsonrpc("tools/list")
+                tools = tools_result.get('result', {}).get('tools', [])
+                _mcp_tools_cache = tools
+                logger.info(f"✅ Discovered MCP tools (HTTP): {[t.get('name') for t in _mcp_tools_cache]}")
+            except Exception as e:
+                # Fallback: use known tools if discovery fails
+                logger.warning(f"Tool discovery failed ({e}), using known tools")
+                _mcp_tools_cache = [
+                    {"name": "rank_resumes_mcp", "description": "Rank resumes using AI"},
+                    {"name": "fetch_job_description_mcp", "description": "Fetch job description from URL"},
+                    {"name": "analyze_resume_mcp", "description": "Analyze single resume"}
+                ]
+                logger.info(f"✅ Using known MCP tools (HTTP): {[t.get('name') for t in _mcp_tools_cache]}")
+
+        # Find the tool
+        tool_info = next((t for t in _mcp_tools_cache if t.get('name') == tool_name), None)
+        if not tool_info:
+            available_tools = [t.get('name') for t in _mcp_tools_cache]
+            raise ValueError(f"Tool '{tool_name}' not found. Available: {available_tools}")
+
+        # Invoke the tool
+        logger.info(f"Invoking MCP tool (HTTP): {tool_name}")
+        invoke_result = await send_jsonrpc("tools/call", {
+            "name": tool_name,
+            "arguments": kwargs
+        })
+
+        # Parse the result
+        result = invoke_result.get('result', {})
+        if 'content' in result:
+            for content_item in result['content']:
+                if content_item.get('type') == 'text':
+                    return json.loads(content_item['text'])
+
+        logger.warning(f"No text content in result from {tool_name}")
+        return result
+
+    except ImportError as e:
+        if 'httpx' in str(e):
+            raise ImportError("httpx is required for Streamable HTTP MCP. Install with: pip install httpx")
+        raise
     except Exception as e:
         logger.error(f"Error invoking MCP tool '{tool_name}': {e}")
         raise
@@ -435,12 +524,14 @@ if __name__ == "__main__":
             print("Error: GOOGLE_API_KEY not set. Please check your .env file.")
             exit(1)
         
-        if not MCP_CONFIG_FILE or not os.path.exists(MCP_CONFIG_FILE):
-            logger.error(f"MCP config file not found: {MCP_CONFIG_FILE}")
-            print(f"Error: MCP config file not found at {MCP_CONFIG_FILE}")
+        # Validate MCP HTTP URL
+        if not MCP_HTTP_URL:
+            logger.error("MCP_HTTP_URL not set")
+            print("Error: MCP_HTTP_URL not set. Please set it in your .env file.")
+            print("Example: MCP_HTTP_URL=http://localhost:5002/mcp")
             exit(1)
         
-        logger.info("Starting HR Recruiter Agent")
+        logger.info("Starting HR Recruiter Agent (Streamable HTTP MCP Mode)")
         
         # Instantiate LLM
         llm = ChatGoogleGenerativeAI(
@@ -482,8 +573,42 @@ Thought: {agent_scratchpad}
         agent = create_react_agent(llm, tools, prompt)
         agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
         
-        # Sample input (can be modified or taken from command line)
-        sample_input = "software_engineer.txt"
+        # Parse command line arguments
+        if len(sys.argv) > 1:
+            if sys.argv[1] in ['--help', '-h', 'help']:
+                print("""
+HR Recruiter AI Agent - Automated Resume Screening and Ranking System
+
+USAGE:
+    python hr_agent.py [JOB_DESCRIPTION] [OPTIONS]
+
+ARGUMENTS:
+    JOB_DESCRIPTION    Path to job description file or URL (default: software_engineer.txt)
+
+OPTIONS:
+    --help, -h         Show this help message
+    --version, -v      Show version information
+
+EXAMPLES:
+    python hr_agent.py                          # Use default job description
+    python hr_agent.py senior_developer.txt     # Use specific job description file
+    python hr_agent.py "https://company.com/jobs/123"  # Use job description from URL
+    python hr_agent.py --help                   # Show this help message
+
+ENVIRONMENT VARIABLES:
+    GOOGLE_API_KEY     Required: Google Gemini API key
+    MCP_HTTP_URL       MCP server URL (default: http://localhost:5002/mcp)
+
+For more information, see README.md
+                """)
+                exit(0)
+            elif sys.argv[1] in ['--version', '-v']:
+                print("HR Recruiter AI Agent v1.0.0")
+                exit(0)
+            else:
+                sample_input = sys.argv[1]
+        else:
+            sample_input = "software_engineer.txt"
         
         print("\n" + "="*60)
         print("HR Recruiter AI Agent - Starting Analysis")
